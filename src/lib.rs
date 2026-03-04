@@ -154,6 +154,50 @@ where
         self.read_reg_i16(&Bank0::TEMP_DATA1)
     }
 
+    /// Read all of the raw sensor data (accelerometer, gyro, temperature) at once.
+    /// 
+    /// This is faster than reading the sensors individually
+    pub fn measure_raw(&mut self) -> Result<(I16x3, I16x3, i16), Error<E>> {
+        let mut bytes = [0u8; 6+6+2]; // Accel + gyro + temp
+        self.i2c.write_read(self.address as u8, &[Bank0::TEMP_DATA1.addr()], &mut bytes)
+            .map_err(|e| Error::BusError(e))?;
+
+        let temp_raw    = i16::from_be_bytes([bytes[0],  bytes[1]]);
+        let accel_raw_x = i16::from_be_bytes([bytes[2],  bytes[3]]);
+        let accel_raw_y = i16::from_be_bytes([bytes[4],  bytes[5]]);
+        let accel_raw_z = i16::from_be_bytes([bytes[6],  bytes[7]]);
+        let gyro_raw_x  = i16::from_be_bytes([bytes[8],  bytes[9]]);
+        let gyro_raw_y  = i16::from_be_bytes([bytes[10], bytes[11]]);
+        let gyro_raw_z  = i16::from_be_bytes([bytes[12], bytes[13]]);
+
+        Ok((I16x3::new(accel_raw_x, accel_raw_y, accel_raw_z), I16x3::new(gyro_raw_x, gyro_raw_y, gyro_raw_z), temp_raw))
+    }
+
+    /// Read all of the normalized sensor data (accelerometer, gyro, temperature) at once.
+    /// 
+    /// This is faster than reading the sensors individually
+    pub fn measure_norm(&mut self) -> Result<(F32x3, F32x3, f32), Error<E>> {
+        let (acc_raw, gyro_raw, temp_raw) = self.measure_raw()?;
+
+        let mut conf_bytes = [0u8; 2];
+        self.i2c.write_read(self.address as u8, &[Bank0::GYRO_CONFIG0.addr()], &mut conf_bytes)
+            .map_err(|e| Error::BusError(e))?;
+
+        let gyro_scale  =  GyroRange::try_from(conf_bytes[0] >> 5)?.scale_factor();
+        let accel_scale = AccelRange::try_from(conf_bytes[1] >> 5)?.scale_factor();
+
+        let temp = (temp_raw as f32 / 128.0) + 25.0;
+        let accel_x = acc_raw.x as f32 / accel_scale;
+        let accel_y = acc_raw.y as f32 / accel_scale;
+        let accel_z = acc_raw.z as f32 / accel_scale;
+        
+        let gyro_x = gyro_raw.x as f32 / gyro_scale;
+        let gyro_y = gyro_raw.y as f32 / gyro_scale;
+        let gyro_z = gyro_raw.z as f32 / gyro_scale;
+
+        Ok((F32x3::new(accel_x, accel_y, accel_z), F32x3::new(gyro_x, gyro_y, gyro_z), temp))
+    }
+
     /// Sets the bandwidth of the temperature signal DLPF (Digital Low Pass
     /// Filter)
     ///
