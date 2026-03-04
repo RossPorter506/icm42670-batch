@@ -135,9 +135,7 @@ where
 
     /// Read the raw gyro data for each of the three axes
     pub fn gyro_raw(&mut self) -> Result<I16x3, Error<E>> {
-        let x = self.read_reg_i16(&Bank0::GYRO_DATA_X1, &Bank0::GYRO_DATA_X0)?;
-        let y = self.read_reg_i16(&Bank0::GYRO_DATA_Y1, &Bank0::GYRO_DATA_Y0)?;
-        let z = self.read_reg_i16(&Bank0::GYRO_DATA_Z1, &Bank0::GYRO_DATA_Z0)?;
+        let (x,y,z) = self.read_reg_i16_triplet(&Bank0::GYRO_DATA_X1)?;
 
         Ok(I16x3::new(x, y, z))
     }
@@ -153,7 +151,7 @@ where
 
     /// Read the raw data from the built-in temperature sensor
     pub fn temperature_raw(&mut self) -> Result<i16, Error<E>> {
-        self.read_reg_i16(&Bank0::TEMP_DATA1, &Bank0::TEMP_DATA0)
+        self.read_reg_i16(&Bank0::TEMP_DATA1)
     }
 
     /// Sets the bandwidth of the temperature signal DLPF (Digital Low Pass
@@ -329,14 +327,30 @@ where
         Ok(buffer[0])
     }
 
-    /// Read two registers and combine them into a single value.
-    fn read_reg_i16<R: Register>(&mut self, reg_hi: &R, reg_lo: &R) -> Result<i16, Error<E>> {
-        let data_hi = self.read_reg(reg_hi)?;
-        let data_lo = self.read_reg(reg_lo)?;
+    /// Read a register and the one after it, combining them into a single value.
+    fn read_reg_i16<R: Register>(&mut self, reg_hi: &R) -> Result<i16, Error<E>> {
+        let mut bytes = [0u8; 2];
+        self.i2c
+            .write_read(self.address as u8, &[reg_hi.addr()], &mut bytes)
+            .map_err(|e| Error::BusError(e))?;
 
-        let data = i16::from_be_bytes([data_hi, data_lo]);
+        let data = i16::from_be_bytes([bytes[0], bytes[1]]);
 
         Ok(data)
+    }
+
+    /// Read six consecutive registers and combine them into three 16-bit values.
+    fn read_reg_i16_triplet<R: Register>(&mut self, reg_hi: &R) -> Result<(i16, i16, i16), Error<E>> {
+        let mut bytes = [0u8; 6];
+        self.i2c
+            .write_read(self.address as u8, &[reg_hi.addr()], &mut bytes)
+            .map_err(|e| Error::BusError(e))?;
+
+        let word1 = i16::from_be_bytes([bytes[0], bytes[1]]);
+        let word2 = i16::from_be_bytes([bytes[2], bytes[3]]);
+        let word3 = i16::from_be_bytes([bytes[4], bytes[5]]);
+
+        Ok((word1, word2, word3))
     }
 
     /// Set a register at the provided address to a given value.
@@ -404,9 +418,7 @@ where
     type Error = Error<E>;
 
     fn accel_raw(&mut self) -> Result<I16x3, AccelerometerError<Self::Error>> {
-        let x = self.read_reg_i16(&Bank0::ACCEL_DATA_X1, &Bank0::ACCEL_DATA_X0)?;
-        let y = self.read_reg_i16(&Bank0::ACCEL_DATA_Y1, &Bank0::ACCEL_DATA_Y0)?;
-        let z = self.read_reg_i16(&Bank0::ACCEL_DATA_Z1, &Bank0::ACCEL_DATA_Z0)?;
+        let (x,y,z) = self.read_reg_i16_triplet(&Bank0::ACCEL_DATA_X1)?;
 
         Ok(I16x3::new(x, y, z))
     }
